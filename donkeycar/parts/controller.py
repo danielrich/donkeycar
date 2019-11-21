@@ -195,6 +195,118 @@ class PyGameJoystick(object):
         return button, button_state, axis, axis_val
 
 
+class PigPioJoystick(object):
+    """
+    This uses pigpio and assumes normal r/c pwm is coming in the GPIO lines.
+    This allows the original r/c controller to be used as the controller.
+    """
+    def __init__(self, throttle_gpio=0, steering_gpio=0, mode_gpio=0):
+        import pigpio
+
+
+        self.throttle_width = 0
+        self.throttle_tick = 0
+
+        self.steering_width = 0
+        self.steering_tick = 0
+
+        self.mode_width = 0
+        self.mode_tick = 0
+
+        self.changed = {'throttle': False, 'steering': False, 'mode': False}
+
+        def throttle_call_back(gpio, level, tick):
+            if level == 1:
+                new_width = tick - self.throttle_tick
+                if self.throttle_width != new_width:
+                    self.throttle_width = new_width 
+                    self.changed['throttle'] = True, new_width
+            else:
+                self.throttle_tick - tick
+
+
+        def steering_call_back(gpio, level, tick):
+            if level == 1:
+                new_width = tick - self.steering_tick
+                if self.steering_width != new_width:
+                    self.steering_width = new_width 
+                    self.changed['steering'] = True, new_width
+            else:
+                self.steering_tick - tick
+
+
+        def mode_call_back(gpio, level, tick):
+            """
+            This one will have to work different it is not PWM.
+            """
+            if level == 1:
+                new_width = tick - self.mode_tick
+                if self.mode_width != new_width:
+                    self.mode_width = new_width 
+                    self.changed['mode'] = True, new_width
+            else:
+                self.throttle_tick - tick
+
+       
+        pi = pigpio.pi()
+
+        # TODO check the latency on these guys.
+        # also perhaps add a little debouncing on that signal. The rollover is killer
+        pi.callback(throttle_gpio, pigpio.EITHER_EDGE, throttle_call_back)
+        pi.callback(steering_gpio, pigpio.EITHER_EDGE, steering_call_back)
+        pi.callback(mode_gpio, pigpio.EITHER_EDGE, mode_call_back)
+
+        print("callbacks configured for pigpio")
+
+
+    def poll(self):
+        button = None
+        button_state = None
+        axis = None
+        axis_val = None
+        
+        for button in changed:
+            if changed[button]:
+                button = button
+                button_state = changed[button][1]
+
+
+        self.joystick.init()
+
+        for i in range( self.joystick.get_numaxes() ):
+            val = self.joystick.get_axis( i )
+            if self.axis_states[i] != val:
+                axis = self.axis_names[i]
+                axis_val = val
+                self.axis_states[i] = val
+                logging.debug("axis: %s val: %f" % (axis, val))
+
+
+        for i in range( self.joystick.get_numbuttons() ):
+            state = self.joystick.get_button( i )
+            if self.button_states[i] != state:
+                button = self.button_names[i]
+                button_state = state
+                self.button_states[i] = state
+                logging.info("button: %s state: %d" % (button, state))
+
+        for i in range( self.joystick.get_numhats() ):
+            hat = self.joystick.get_hat( i )
+            horz, vert = hat
+            iBtn = self.joystick.get_numbuttons() + (i * 4)
+            states = (horz == -1, horz == 1, vert == -1, vert == 1)
+            for state in states:
+                state = int(state)
+                if self.button_states[iBtn] != state:
+                    button = self.button_names[iBtn]
+                    button_state = state
+                    self.button_states[iBtn] = state
+                iBtn += 1
+
+        return button, button_state, axis, axis_val
+
+
+
 class JoystickCreator(Joystick):
     '''
     A Helper class to create a new joystick mapping
